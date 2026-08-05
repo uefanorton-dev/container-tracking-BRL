@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top"> <!-- สำคัญมาก: อนุญาตให้ GAS ทำการ Redirect ทะลุ iframe ได้ -->
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Driver ส่งงานตู้</title>
+  <style>
+    body { font-family: 'Kanit', sans-serif; background-color: #f4f6f9; padding: 20px; margin: 0; }
+    .container { max-width: 400px; margin: 0 auto; background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+    h2 { text-align: center; color: #333; margin-top: 0; }
+    label { font-weight: bold; display: block; margin-top: 15px; margin-bottom: 8px; color: #555; }
+    input[type="text"], input[type="file"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-family: 'Kanit', sans-serif; }
+    button { width: 100%; padding: 14px; background-color: #00B900; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; margin-top: 25px; cursor: pointer; transition: 0.3s; }
+    button:disabled { background-color: #ccc; cursor: not-allowed; }
+    #status { margin-top: 20px; text-align: center; color: #666; font-size: 14px; padding: 10px; border-radius: 6px; background-color: #f8f9fa; }
+  </style>
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+</head>
+<body>
+
+  <div class="container">
+    <h2>🚚 ส่งงานตู้ / ซีล</h2>
+    
+    <label for="bookingNo">เลข Booking No.</label>
+    <input type="text" id="bookingNo" placeholder="ระบุเลข Booking..." required>
+    
+    <label for="imageUpload">ถ่ายรูปตู้ / ซีล (เลือกได้หลายรูป)</label>
+    <input type="file" id="imageUpload" accept="image/*" multiple required>
+    
+    <button id="submitBtn" onclick="submitData()">ส่งงานให้ระบบ AI</button>
+    <div id="status">กำลังเชื่อมต่อระบบรักษาความปลอดภัย LINE... ⏳</div>
+  </div>
+
+  <script>
+    // ==========================================
+    // ส่วนที่ต้องตั้งค่า (กรอกข้อมูลของคุณที่นี่)
+    // ==========================================
+    const MY_LIFF_ID = "2010964214-ENTz806Z"; 
+    const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxL2WbgH4ss_VBUycP4pSM3SkT4q4XKU4xmo-6XOv-HwEVmjf_v3AWgB4AnzB_LeFGv/exec"; 
+
+    let userId = "Unknown";
+
+    // ==========================================
+    // ระบบเริ่มต้น LIFF (ออกแบบมาเพื่อทะลวง ITP ของ iOS)
+    // ==========================================
+    async function initializeLiff() {
+      const statusDiv = document.getElementById("status");
+      
+      try {
+        await liff.init({ liffId: MY_LIFF_ID });
+        
+        if (!liff.isLoggedIn()) {
+          statusDiv.innerHTML = "กำลังสลับไปยังหน้าต่างล็อกอิน...";
+          // ใช้ liff.login แบบระบุ Redirect URI เพื่อป้องกันจอขาวจาก iframe
+          liff.login({ redirectUri: window.location.href });
+          return;
+        } 
+        
+        const profile = await liff.getProfile();
+        userId = profile.userId;
+        
+        statusDiv.innerHTML = "✅ เชื่อมต่อสำเร็จ (คนขับ: " + profile.displayName + ")";
+        statusDiv.style.backgroundColor = "#e8f5e9";
+        statusDiv.style.color = "#2e7d32";
+
+      } catch (err) {
+        console.error("LIFF Init Error:", err);
+        statusDiv.innerHTML = "❌ ระบบ LIFF มีปัญหา: <br>" + err.message;
+        statusDiv.style.backgroundColor = "#ffebee";
+        statusDiv.style.color = "#c62828";
+      }
+    }
+
+    window.onload = initializeLiff;
+
+    // ==========================================
+    // ระบบแพ็คข้อมูลและส่งไปให้ GAS (Backend)
+    // ==========================================
+    async function submitData() {
+      const bookingNo = document.getElementById('bookingNo').value.trim();
+      const fileInput = document.getElementById('imageUpload');
+      const submitBtn = document.getElementById('submitBtn');
+      const statusDiv = document.getElementById('status');
+
+      if (!bookingNo || fileInput.files.length === 0) {
+        alert("⚠️ กรุณากรอก Booking No. และแนบรูปภาพให้ครบถ้วน");
+        return;
+      }
+
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = "กำลังประมวลผล... (ห้ามปิดหน้าจอ)";
+      statusDiv.innerHTML = "กำลังแปลงไฟล์ภาพ... ⏳";
+      statusDiv.style.backgroundColor = "#fff3e0";
+      statusDiv.style.color = "#ef6c00";
+
+      try {
+        let imagesArray = [];
+        for (let i = 0; i < fileInput.files.length; i++) {
+          let base64 = await fileToJSON(fileInput.files[i]);
+          imagesArray.push(base64);
+        }
+
+        const payload = {
+          source: "LIFF",
+          userId: userId,
+          groupId: userId, 
+          bookingNo: bookingNo,
+          images: imagesArray
+        };
+
+        statusDiv.innerHTML = "กำลังอัปโหลดข้อมูลให้ AI... 🚀";
+
+        const response = await fetch(GAS_WEB_APP_URL, {
+          method: 'POST',
+          body: JSON.stringify(payload)
+        });
+
+        const result = await response.json();
+
+        if (result.status === "success") {
+          statusDiv.innerHTML = "✅ ส่งงานสำเร็จ ระบบกำลังแจ้งเตือนในแชท";
+          statusDiv.style.backgroundColor = "#e8f5e9";
+          statusDiv.style.color = "#2e7d32";
+          alert("ส่งงานเรียบร้อย สามารถปิดหน้านี้ได้เลยครับ");
+          liff.closeWindow(); 
+        } else {
+          throw new Error(result.message);
+        }
+
+      } catch (error) {
+        statusDiv.innerHTML = "❌ การส่งล้มเหลว: " + error.message;
+        statusDiv.style.backgroundColor = "#ffebee";
+        statusDiv.style.color = "#c62828";
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = "ลองส่งใหม่อีกครั้ง";
+      }
+    }
+
+    function fileToJSON(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ mimeType: file.type, base64: reader.result.split(',')[1] });
+        reader.onerror = error => reject(error);
+        reader.readAsDataURL(file);
+      });
+    }
+  </script>
+</body>
+</html>
