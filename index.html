@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <base target="_top"> <!-- สำคัญมาก: อนุญาตให้ GAS ทำการ Redirect ทะลุ iframe ได้ -->
+  <base target="_top">
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Driver ส่งงานตู้</title>
@@ -10,7 +10,8 @@
     .container { max-width: 400px; margin: 0 auto; background: white; padding: 25px 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
     h2 { text-align: center; color: #333; margin-top: 0; }
     label { font-weight: bold; display: block; margin-top: 15px; margin-bottom: 8px; color: #555; }
-    input[type="text"], input[type="file"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-family: 'Kanit', sans-serif; }
+    /* เปลี่ยนจาก input text เป็น select dropdown */
+    select, input[type="file"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; box-sizing: border-box; font-family: 'Kanit', sans-serif; font-size: 16px; background-color: #fff; }
     button { width: 100%; padding: 14px; background-color: #00B900; color: white; border: none; border-radius: 8px; font-size: 16px; font-weight: bold; margin-top: 25px; cursor: pointer; transition: 0.3s; }
     button:disabled { background-color: #ccc; cursor: not-allowed; }
     #status { margin-top: 20px; text-align: center; color: #666; font-size: 14px; padding: 10px; border-radius: 6px; background-color: #f8f9fa; }
@@ -23,44 +24,78 @@
     <h2>🚚 ส่งงานตู้ / ซีล</h2>
     
     <label for="bookingNo">เลข Booking No.</label>
-    <input type="text" id="bookingNo" placeholder="ระบุเลข Booking..." required>
+    <!-- เปลี่ยนเป็น Dropdown -->
+    <select id="bookingNo" required>
+      <option value="" disabled selected>⏳ กำลังโหลดเลข Booking...</option>
+    </select>
     
     <label for="imageUpload">ถ่ายรูปตู้ / ซีล (เลือกได้หลายรูป)</label>
     <input type="file" id="imageUpload" accept="image/*" multiple required>
     
     <button id="submitBtn" onclick="submitData()">ส่งงานให้ระบบ AI</button>
-    <div id="status">กำลังเชื่อมต่อระบบรักษาความปลอดภัย LINE... ⏳</div>
+    <div id="status">กำลังเตรียมความพร้อมระบบ... ⏳</div>
   </div>
 
   <script>
-    // ==========================================
-    // ส่วนที่ต้องตั้งค่า (กรอกข้อมูลของคุณที่นี่)
-    // ==========================================
     const MY_LIFF_ID = "2010964214-ENTz806Z"; 
     const GAS_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbxL2WbgH4ss_VBUycP4pSM3SkT4q4XKU4xmo-6XOv-HwEVmjf_v3AWgB4AnzB_LeFGv/exec"; 
 
+    // เพิ่มตัวแปร displayName
     let userId = "Unknown";
+    let displayName = "Unknown";
 
     // ==========================================
-    // ระบบเริ่มต้น LIFF (ออกแบบมาเพื่อทะลวง ITP ของ iOS)
+    // 1. ดึงข้อมูล Booking จาก Google Sheets มาใส่ Dropdown
+    // ==========================================
+    async function loadBookingNumbers() {
+      const selectElement = document.getElementById("bookingNo");
+      try {
+        // ยิง GET ไปที่ GAS โดยพ่วง parameter ?action=getBooking
+        const response = await fetch(GAS_WEB_APP_URL + "?action=getBooking");
+        const data = await response.json();
+        
+        // เคลียร์ค่าเดิม และใส่ข้อมูลใหม่
+        selectElement.innerHTML = '<option value="" disabled selected>-- โปรดเลือกเลข Booking --</option>';
+        
+        if(data.length === 0) {
+           selectElement.innerHTML = '<option value="" disabled>ไม่มีงาน Booking ในขณะนี้</option>';
+           return;
+        }
+
+        data.forEach(booking => {
+          let option = document.createElement("option");
+          option.value = booking;
+          option.textContent = booking;
+          selectElement.appendChild(option);
+        });
+
+      } catch (err) {
+        console.error("Error loading bookings:", err);
+        selectElement.innerHTML = '<option value="">⚠️ โหลดข้อมูลล้มเหลว (พิมพ์เอง)</option>';
+        // หากโหลดพัง เปลี่ยนกลับเป็นช่องให้พิมพ์เองชั่วคราว (Fallback)
+        selectElement.outerHTML = '<input type="text" id="bookingNo" placeholder="ระบุเลข Booking..." required>';
+      }
+    }
+
+    // ==========================================
+    // 2. ระบบเริ่มต้น LIFF
     // ==========================================
     async function initializeLiff() {
       const statusDiv = document.getElementById("status");
-      
       try {
         await liff.init({ liffId: MY_LIFF_ID });
         
         if (!liff.isLoggedIn()) {
           statusDiv.innerHTML = "กำลังสลับไปยังหน้าต่างล็อกอิน...";
-          // ใช้ liff.login แบบระบุ Redirect URI เพื่อป้องกันจอขาวจาก iframe
           liff.login({ redirectUri: window.location.href });
           return;
         } 
         
         const profile = await liff.getProfile();
         userId = profile.userId;
+        displayName = profile.displayName; // เก็บชื่อไลน์
         
-        statusDiv.innerHTML = "✅ เชื่อมต่อสำเร็จ (คนขับ: " + profile.displayName + ")";
+        statusDiv.innerHTML = "✅ พร้อมทำงาน (คนขับ: " + displayName + ")";
         statusDiv.style.backgroundColor = "#e8f5e9";
         statusDiv.style.color = "#2e7d32";
 
@@ -72,19 +107,24 @@
       }
     }
 
-    window.onload = initializeLiff;
+    // ทำงาน 2 อย่างพร้อมกันตอนเปิดหน้าเว็บ (โหลด LIFF และ โหลด Booking)
+    window.onload = () => {
+      initializeLiff();
+      loadBookingNumbers();
+    };
 
     // ==========================================
-    // ระบบแพ็คข้อมูลและส่งไปให้ GAS (Backend)
+    // 3. ระบบแพ็คข้อมูลและส่งไปให้ GAS (Backend)
     // ==========================================
     async function submitData() {
-      const bookingNo = document.getElementById('bookingNo').value.trim();
+      // ไม่ต้องใช้ .trim() แล้วเพราะเป็น Dropdown
+      const bookingNo = document.getElementById('bookingNo').value;
       const fileInput = document.getElementById('imageUpload');
       const submitBtn = document.getElementById('submitBtn');
       const statusDiv = document.getElementById('status');
 
       if (!bookingNo || fileInput.files.length === 0) {
-        alert("⚠️ กรุณากรอก Booking No. และแนบรูปภาพให้ครบถ้วน");
+        alert("⚠️ กรุณาเลือก Booking No. และแนบรูปภาพให้ครบถ้วน");
         return;
       }
 
@@ -104,6 +144,7 @@
         const payload = {
           source: "LIFF",
           userId: userId,
+          displayName: displayName, // แนบชื่อไลน์ไปกับข้อมูลด้วย
           groupId: userId, 
           bookingNo: bookingNo,
           images: imagesArray
