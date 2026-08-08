@@ -25,7 +25,7 @@
 <body>
 
   <div class="container">
-    <h2>🚚 ส่งงานตู้ / ซีล</h2>
+    <h2>🚚 ส่งงานตู้ / ซีล / EIR</h2>
     
     <label for="bookingNo">เลข Booking No.</label>
     <!-- เพิ่มคำสั่ง onchange เพื่อดึงข้อมูลมาแสดงทันทีที่คลิกเลือก -->
@@ -172,7 +172,7 @@
           images: imagesArray
         };
 
-        statusDiv.innerHTML = "กำลังส่งข้อมูลเข้าสู่โมเดล Gemini 3.1 Pro... 🚀";
+        statusDiv.innerHTML = "กำลังส่งข้อมูลเข้าสู่โมเดล Gemini 3.6 Pro... 🚀";
 
         const response = await fetch(GAS_WEB_APP_URL, {
           method: 'POST',
