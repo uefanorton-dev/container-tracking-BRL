@@ -3,194 +3,714 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BRL Dispatcher Dashboard</title>
+    <meta name="referrer" content="no-referrer">
+    <meta name="theme-color" content="#192a56">
+    <meta name="robots" content="noindex, nofollow">
+    <title>BRL Dispatcher Workbench</title>
+
+    <!-- ตั้งค่าโหมดมืดให้ทันก่อนวาดหน้าจอ (กันภาพกระพริบตอนโหลด) -->
+    <script>
+        (function () {
+            try {
+                if (localStorage.getItem("brl_dashboard_theme") === "dark") {
+                    document.documentElement.setAttribute("data-theme", "dark");
+                }
+            } catch (e) { /* localStorage อาจถูกบล็อก เช่นโหมด private */ }
+        })();
+    </script>
+
     <style>
-        /* ================= ธีมบริษัท บูรพารุ่งโรจน์ โลจิสติกส์ ================= */
-        :root { 
-            --primary: #0a3d62; /* สีน้ำเงินกรมท่า */
-            --secondary: #3c6382; 
-            --accent: #e55039; /* สีส้ม/แดง โลจิสติกส์ */
-            --bg: #f1f2f6; 
+        :root {
+            --primary: #192a56; --primary-2: #273c75; --accent: #e84118;
+            --success: #44bd32; --warning: #fbc531; --danger: #c0392b;
+            --bg: #f4f6fa; --card: #ffffff; --line: #e5e7eb;
+            --text: #2f3640; --muted: #7f8fa6;
+            --shadow: 0 8px 24px rgba(25, 42, 86, 0.08);
+            --radius: 16px;
         }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); margin: 0; padding: 20px; }
-        
-        .header { text-align: center; margin-bottom: 30px; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: flex; align-items: center; justify-content: center; gap: 15px; flex-wrap: wrap; }
-        .header img { height: 60px; } /* ขนาดโลโก้ */
-        .header-text h1 { color: var(--primary); margin: 0 0 5px 0; font-size: 24px; }
-        .status-badge { background: #2ecc71; color: white; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: bold; }
-        
-        /* โครงสร้างการ์ด Booking */
-        .booking-card { background: white; border-radius: 10px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); margin-bottom: 25px; overflow: hidden; border-left: 5px solid var(--primary); }
-        .booking-header { background: var(--primary); color: white; padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-        .booking-title { font-size: 18px; font-weight: bold; }
-        
-        /* ชุดปุ่มกด */
-        .action-group { display: flex; align-items: center; gap: 15px; }
-        .btn-send { background-color: var(--accent); color: white; border: none; padding: 8px 15px; border-radius: 5px; font-weight: bold; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 5px; }
-        .btn-send:hover { background-color: #c0392b; transform: translateY(-2px); }
-        
-        /* สวิตช์ Auto (Toggle) */
-        .toggle-wrapper { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: bold; background: rgba(255,255,255,0.1); padding: 5px 10px; border-radius: 20px; }
-        .switch { position: relative; display: inline-block; width: 40px; height: 22px; }
-        .switch input { opacity: 0; width: 0; height: 0; }
-        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
-        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: white; transition: .4s; border-radius: 50%; }
-        input:checked + .slider { background-color: #2ecc71; }
-        input:checked + .slider:before { transform: translateX(18px); }
+        :root[data-theme="dark"] {
+            --primary: #7d9cff; --primary-2: #5c7cfa; --accent: #ff7a57;
+            --success: #6fcf6f; --warning: #f5c451; --danger: #ff6b6b;
+            --bg: #10131c; --card: #1a1f2e; --line: #2c3346;
+            --text: #e7e9f3; --muted: #9096ad;
+            --shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+        }
+        * { box-sizing: border-box; }
+        body { margin: 0; padding: 20px; background: radial-gradient(circle at top right, rgba(39, 60, 117, 0.08), transparent 28%), var(--bg); color: var(--text); font-family: "Segoe UI", "Noto Sans Thai", Tahoma, sans-serif; }
+        button, input, select { font: inherit; }
 
-        /* ตารางรายการตู้ */
-        .container-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 15px; padding: 15px; }
-        .container-item { border: 1px solid #e0e6ed; border-radius: 8px; padding: 15px; background: #fafbfc; }
-        .info-row { display: flex; justify-content: space-between; margin-bottom: 8px; font-size: 14px; }
-        .info-label { font-weight: bold; color: #7f8c8d; }
-        .info-value { color: var(--primary); font-weight: bold; }
-        
-        /* รูปภาพ */
-        .image-gallery { display: flex; gap: 10px; margin-top: 15px; }
-        .img-box { flex: 1; text-align: center; }
-        .img-box img { width: 100%; height: 90px; object-fit: cover; border-radius: 6px; border: 1px solid #ddd; cursor: zoom-in; transition: 0.2s; }
-        .img-box img:hover { transform: translateY(-3px); box-shadow: 0 4px 8px rgba(0,0,0,0.2); border-color: var(--accent); }
-        .img-box p { margin: 5px 0 0 0; font-size: 11px; color: #95a5a6; font-weight: bold; }
+        /* THEME FADE OVERLAY — ใช้คลุมจอตอนสลับโหมดมืด/สว่าง (ดู toggleTheme() ใน JS)
+           animate แค่ opacity ของ div เดียว ไม่ว่าหน้าจะมีการ์ด/รูปกี่ร้อยชิ้นก็ไม่กระทบความเร็ว */
+        .theme-fade { position: fixed; inset: 0; z-index: 99999; pointer-events: none; opacity: 1; transition: opacity .25s ease; }
+        button { cursor: pointer; }
+        .app { width: min(1500px, 100%); margin: 0 auto; }
 
-        .modal { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.9); }
-        .modal-content { margin: auto; display: block; max-width: 90%; max-height: 90vh; margin-top: 2%; border-radius: 8px; }
-        .close-modal { position: absolute; top: 15px; right: 35px; color: #f1f1f1; font-size: 40px; font-weight: bold; cursor: pointer; }
+        /* HEADER */
+        .header { display: flex; justify-content: space-between; align-items: center; gap: 18px; padding: 20px 24px; margin-bottom: 18px; background: linear-gradient(135deg, var(--card), var(--bg)); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+        .brand { display: flex; align-items: center; gap: 15px; }
+        .brand img { width: 58px; height: 58px; object-fit: contain; border-radius: 12px; }
+        .brand h1 { margin: 0; color: var(--primary); font-size: 24px; font-weight: 900; }
+        .brand p { margin: 4px 0 0; color: var(--muted); font-size: 12px; font-weight: 600; }
+        .header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .sync-status { padding: 8px 12px; border-radius: 999px; background: #eaf9e7; color: #208d19; font-size: 12px; font-weight: 800; }
+        .header-btn { border: 0; border-radius: 10px; padding: 10px 13px; background: var(--bg); color: var(--primary); font-weight: 800; transition: 0.2s; }
+        .header-btn:hover { background: var(--line); }
+
+        /* SEARCH BAR */
+        .controls { display: flex; gap: 10px; align-items: center; padding: 12px; margin-bottom: 18px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); }
+        .search { flex: 1; min-width: 200px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; outline: none; background: var(--card); color: var(--text); }
+        .search:focus { border-color: var(--primary); }
+        .filter { padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--text); }
+
+        /* BOOKING */
+        .booking-card { margin-bottom: 18px; overflow: hidden; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
+        .booking-header { display: flex; justify-content: space-between; align-items: center; gap: 15px; padding: 18px 20px; background: linear-gradient(135deg, #192a56, #273c75); color: white; }
+        .booking-title { font-size: 19px; font-weight: 900; }
+        .booking-plan { margin-top: 4px; color: rgba(255,255,255,0.68); font-size: 11px; font-weight: 700; }
+        .booking-progress { margin-top: 10px; width: min(430px, 100%); }
+        .progress-track { height: 7px; overflow: hidden; border-radius: 99px; background: rgba(255,255,255,0.16); }
+        .progress-fill { height: 100%; border-radius: inherit; background: #44bd32; }
+        .progress-text { display: flex; justify-content: space-between; gap: 10px; margin-top: 5px; color: rgba(255,255,255,0.72); font-size: 11px; font-weight: 700; }
+        .booking-body { padding: 16px; background: var(--bg); }
+
+        /* CONTAINERS */
+        .container-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(370px, 1fr)); gap: 14px; }
+        .container-card { position: relative; overflow: hidden; background: var(--card); border: 1px solid var(--line); border-radius: 14px; transition: transform .15s ease, box-shadow .15s ease; padding: 16px;}
+        .container-card:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(25,42,86,0.09); }
+
+        .container-position { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; margin-bottom: 12px; border-radius: 999px; background: #ffeaa7; color: #b33939; font-size: 12px; font-weight: 900; border: 1px solid #fbc531; }
+        .container-number-row { display: flex; justify-content: space-between; gap: 10px; align-items: flex-start; border-bottom: 1px dashed var(--line); padding-bottom: 10px; margin-bottom: 10px;}
+        .container-number { color: var(--primary); font-size: 18px; font-weight: 900; word-break: break-word; }
+        .size-badge { padding: 5px 8px; border-radius: 999px; background: var(--bg); color: var(--muted); font-size: 10px; font-weight: 900; }
+
+        .info-row { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 10px; margin-bottom: 7px; font-size: 13px; align-items: center;}
+        .info-label { color: var(--muted); font-weight: 800; }
+        .info-value { color: var(--primary); font-weight: 800; word-break: break-word; }
+        .status-verified { display: inline-block; padding: 4px 8px; background: #e9f8e7; color: #278c1d; border-radius: 6px; font-size: 11px; font-weight: bold; border: 1px solid #bee9b7;}
+
+        /* IMAGES */
+        .gallery { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 15px; }
+        .image-box { text-align: center; }
+        .image-box img { width: 100%; height: 90px; display: block; object-fit: cover; border-radius: 9px; border: 1px solid var(--line); cursor: zoom-in; background: var(--bg); }
+        .image-label { margin-top: 5px; color: var(--muted); font-size: 11px; font-weight: 800; }
+        .missing-image { display: flex; align-items: center; justify-content: center; height: 90px; border-radius: 9px; border: 1px dashed var(--line); background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 800; }
+
+        /* BUTTONS */
+        .btn-smart-copy { width: 100%; margin-top: 15px; padding: 12px; border: 0; border-radius: 10px; background: linear-gradient(135deg, #192a56, #273c75); color: white; font-size: 13px; font-weight: 900; transition: .15s ease; display: flex; justify-content: center; align-items: center; gap: 8px; box-shadow: 0 4px 10px rgba(25,42,86,.18);}
+        .btn-smart-copy:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(25,42,86,.25);}
+        .btn-smart-copy:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
+        .btn-edit { background: var(--bg); border: 1px solid var(--line); color: var(--text); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer; transition: 0.2s; margin-left: 8px; }
+        .btn-edit:hover { background: var(--line); }
+
+        /* MODALS */
+        .modal { display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; padding: 20px; background: rgba(0,0,0,.88); }
+        .modal.active { display: flex; }
+        .modal-image { max-width: 94vw; max-height: 88vh; border-radius: 10px; object-fit: contain; }
+        .modal-close { position: fixed; top: 20px; right: 28px; width: 44px; height: 44px; border: 0; border-radius: 50%; background: rgba(255,255,255,.12); color: white; font-size: 25px; cursor: pointer;}
+
+        .edit-modal-content { background: var(--card); padding: 24px; border-radius: var(--radius); width: 100%; max-width: 400px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
+        .edit-modal-content h3 { margin: 0 0 15px 0; color: var(--primary); }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 12px; font-weight: bold; color: var(--muted); margin-bottom: 5px; }
+        .form-group input { width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: 8px; outline: none; font-weight: bold; color: var(--primary); background: var(--card); }
+        .form-group input:focus { border-color: var(--primary); }
+        .edit-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .btn-save { flex: 1; padding: 10px; background: var(--success); color: white; border: none; border-radius: 8px; font-weight: bold; }
+        .btn-cancel { flex: 1; padding: 10px; background: var(--line); color: var(--text); border: none; border-radius: 8px; font-weight: bold; }
+
+        .toast { position: fixed; left: 50%; bottom: 24px; z-index: 10000; transform: translateX(-50%) translateY(20px); opacity: 0; min-width: 280px; padding: 14px 18px; border-radius: 12px; background: #192a56; color: white; text-align: center; box-shadow: 0 12px 30px rgba(0,0,0,.2); pointer-events: none; transition: opacity .2s ease, transform .2s ease; font-size: 13px; font-weight: 800; }
+        .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+        .toast.success { background: #278c1d; }
+        .toast.error { background: #c0392b; }
+
+        .empty-state { padding: 65px 20px; background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); text-align: center; box-shadow: var(--shadow); }
+        .empty-icon { font-size: 45px; }
+        .empty-title { margin-top: 10px; color: var(--primary); font-size: 19px; font-weight: 900; }
+        .empty-text { margin-top: 6px; color: var(--muted); font-size: 12px; }
     </style>
 </head>
 <body>
 
-    <div class="header">
-        <!-- ดึงโลโก้จาก GitHub ของพี่โดยตรง -->
-        <img src="https://uefanorton-dev.github.io/burapa-rungroj-logistics/img/logo.png" alt="BRL Logo" onerror="this.style.display='none'">
-        <div class="header-text">
-            <h1>Burapa Rungroj Logistics Dashboard</h1>
-            <span class="status-badge" id="sync-status">🟢 ระบบกำลังซิงค์ข้อมูล Real-time...</span>
+<div class="app">
+    <!-- HEADER -->
+    <header class="header">
+        <div class="brand">
+            <img src="https://uefanorton-dev.github.io/burapa-rungroj-logistics/img/logo.png" alt="BRL Logo" onerror="this.style.display='none'">
+            <div>
+                <h1>Burapa Rungroj Logistics</h1>
+                <p>Dispatcher Workbench • One-Click Copy</p>
+            </div>
+        </div>
+        <div class="header-actions">
+            <div class="sync-status" id="sync-status">🟢 กำลังเตรียมระบบ</div>
+            <button class="header-btn" id="theme-toggle" type="button" onclick="toggleTheme()">🌙 โหมดมืด</button>
+            <button class="header-btn" type="button" onclick="changeAccessCode()">🔑 รหัสเข้าใช้งาน</button>
+            <button class="header-btn" type="button" onclick="fetchDashboardData(true)">🔄 รีเฟรช</button>
+        </div>
+    </header>
+
+    <!-- SEARCH -->
+    <section class="controls">
+        <input id="search" class="search" type="search" placeholder="🔎 ค้นหา Booking / เบอร์ตู้ / ซีล...">
+        <select id="filter" class="filter">
+            <option value="all">สถานะทั้งหมด</option>
+            <option value="verified">✅ ยืนยันแล้ว</option>
+        </select>
+    </section>
+
+    <!-- DASHBOARD -->
+    <main id="dashboard-container">
+        <div class="empty-state">
+            <div class="empty-icon">⏳</div>
+            <div class="empty-title">กำลังดึงข้อมูล...</div>
+            <div class="empty-text">ระบบกำลังเชื่อมต่อฐานข้อมูล</div>
+        </div>
+    </main>
+</div>
+
+<!-- IMAGE MODAL -->
+<div id="imageModal" class="modal" onclick="closeModal()">
+    <button class="modal-close" type="button" onclick="closeModal(event)">×</button>
+    <img id="expandedImg" class="modal-image" alt="Preview" onclick="event.stopPropagation()">
+</div>
+
+<!-- EDIT MODAL (ฟอร์มแก้ไขข้อมูล) -->
+<div id="editModal" class="modal">
+    <div class="edit-modal-content">
+        <h3>✏️ แก้ไขข้อมูลตู้</h3>
+        <input type="hidden" id="edit-booking">
+        <input type="hidden" id="edit-old-container">
+        <input type="hidden" id="edit-plan-date">
+
+        <div class="form-group">
+            <label>📦 เบอร์ตู้คอนเทนเนอร์</label>
+            <input type="text" id="edit-container">
+        </div>
+        <div class="form-group">
+            <label>📏 ขนาดตู้</label>
+            <input type="text" id="edit-size">
+        </div>
+        <div class="form-group">
+            <label>🔒 ซีลล็อกตู้</label>
+            <input type="text" id="edit-seal">
+        </div>
+        <div class="form-group">
+            <label>🚚 ทะเบียนรถ</label>
+            <input type="text" id="edit-plate">
+        </div>
+        <div class="form-group">
+            <label>👤 ชื่อ พขร.</label>
+            <input type="text" id="edit-driver">
+        </div>
+
+        <div class="edit-actions">
+            <button class="btn-cancel" onclick="closeEditModal()">ยกเลิก</button>
+            <button class="btn-save" id="btn-save-edit" onclick="submitEditData()">💾 บันทึกการแก้ไข</button>
         </div>
     </div>
+</div>
 
-    <div id="dashboard-container">
-        <p style="text-align:center; color:#7f8c8d;">กำลังดึงข้อมูลจากฐานข้อมูล...</p>
-    </div>
+<div id="toast" class="toast"></div>
 
-    <div id="imageModal" class="modal" onclick="closeModal()">
-        <span class="close-modal">&times;</span>
-        <img class="modal-content" id="expandedImg">
-    </div>
+<script>
+/* ============================================================
+   CONFIG
+============================================================ */
+// 🚨 เปลี่ยนเป็น Web App URL ของคุณ
+const GAS_API_URL = "https://script.google.com/macros/s/AKfycbyJaiBMVZeZUSDFyVju1pOqFWMN9kdMikqSIzk1oGCK0zAQEKs9F1D9ORiCR_INbKXT/exec";
+const TOKEN_KEY = "brl_dashboard_token";
+const THEME_KEY = "brl_dashboard_theme";
 
-    <script>
-        // 🚨 เอา Web App URL ที่ก๊อปปี้มา วางตรงนี้เลยค่ะ 🚨
-        const GAS_API_URL = "https://script.google.com/macros/s/AKfycbxI4jEew4rYNF_pklx_mHW-oUdmVsZ4YL1iQuquIyXfljAiLelBUuXCOc1Nv8pO1RE-/exec"; 
+let dashboardData = [];
+let toastTimer = null;
 
-        async function fetchDashboardData() {
-            try {
-                const response = await fetch(GAS_API_URL + "?action=getDashboardData");
-                const data = await response.json();
-                renderDashboard(data);
-            } catch (error) {
-                console.error("Error:", error);
-                document.getElementById('sync-status').innerText = "🔴 ขาดการเชื่อมต่อ (กำลังพยายามใหม่...)";
-                document.getElementById('sync-status').style.background = "#e74c3c";
-            }
+function safe(val) { return (val === null || val === undefined) ? "" : String(val).trim(); }
+function esc(val) { return safe(val).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;"); }
+
+// ⭐️ ใช้ห่อค่าที่จะฝังลงใน onclick="..."/onclick='...' เพื่อกันหลุดออกจาก attribute (กัน XSS)
+// escape ทั้ง & < > " ' ครบทุกตัว จึงปลอดภัยไม่ว่า attribute จะใช้ single หรือ double quote
+function escJsonAttr(value) {
+    return JSON.stringify(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+}
+
+function debounce(fn, delay) {
+    let timer = null;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), delay);
+    };
+}
+
+function getDirectImgUrl(url) {
+    if (!url) return "";
+    let match = url.match(/[?&]id=([a-zA-Z0-9_-]+)/) || url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+    if (match && match[1]) return `https://lh3.googleusercontent.com/d/${match[1]}`;
+    return url;
+}
+
+function showToast(message, type = "success") {
+    const toast = document.getElementById("toast");
+    toast.textContent = message;
+    toast.className = `toast show ${type}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { toast.className = "toast"; }, 4000);
+}
+
+/* ============================================================
+   ACCESS TOKEN (ป้องกันเรียก API ตรง ๆ โดยไม่ผ่านหน้าเว็บ)
+   ⚠️ ฝั่ง Google Apps Script (Web App) ต้องตรวจสอบค่า token นี้เองด้วย
+   ไม่งั้นเป็นแค่การซ่อน ไม่ใช่การป้องกันจริง — ดูตัวอย่างโค้ดฝั่ง GAS ท้ายไฟล์นี้
+============================================================ */
+function getStoredToken() {
+    try { return localStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; }
+}
+function setStoredToken(token) {
+    try { localStorage.setItem(TOKEN_KEY, token); } catch (e) { /* private mode ฯลฯ */ }
+}
+function ensureToken() {
+    let token = getStoredToken();
+    if (!token) {
+        token = safe(window.prompt("🔑 กรุณาใส่รหัสผ่านเข้าใช้งานแดชบอร์ด (ขอจากผู้ดูแลระบบ)") || "");
+        if (token) setStoredToken(token);
+    }
+    return token;
+}
+function changeAccessCode() {
+    const token = safe(window.prompt("🔑 กรอกรหัสผ่านใหม่", getStoredToken()) || "");
+    if (token) {
+        setStoredToken(token);
+        fetchDashboardData(true);
+    }
+}
+function withToken(url) {
+    const token = ensureToken();
+    if (!token) return url;
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}token=${encodeURIComponent(token)}`;
+}
+
+/* ============================================================
+   THEME (โหมดมืด/สว่าง)
+============================================================ */
+function applyTheme(isDark) {
+    const root = document.documentElement;
+    if (isDark) {
+        root.setAttribute("data-theme", "dark");
+        try { localStorage.setItem(THEME_KEY, "dark"); } catch (e) {}
+    } else {
+        root.removeAttribute("data-theme");
+        try { localStorage.setItem(THEME_KEY, "light"); } catch (e) {}
+    }
+    updateThemeButtonLabel();
+}
+
+// ⭐️ เทคนิคเบา: คลุมจอด้วย div สีพื้นเดิมก่อน สลับสีจริงข้างใต้แบบทันที (มองไม่เห็นเพราะโดนบังอยู่)
+// แล้วค่อย fade เฉพาะ overlay นี้ออก — animate แค่ opacity ของ element เดียว ไม่ต้อง repaint การ์ด/รูปทั้งหน้า จึงไม่มีทางกระตุกไม่ว่าหน้าจะหนักแค่ไหน
+function toggleTheme() {
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+    const overlay = document.createElement("div");
+    overlay.className = "theme-fade";
+    overlay.style.background = getComputedStyle(document.body).backgroundColor;
+    document.body.appendChild(overlay);
+    overlay.getBoundingClientRect(); // บังคับ reflow ก่อนเริ่ม fade ไม่งั้น browser อาจรวบขั้นตอนจนไม่มีอนิเมชัน
+
+    applyTheme(!isDark);
+
+    requestAnimationFrame(() => { overlay.style.opacity = "0"; });
+    setTimeout(() => overlay.remove(), 300);
+}
+function updateThemeButtonLabel() {
+    const btn = document.getElementById("theme-toggle");
+    if (!btn) return;
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
+    btn.textContent = isDark ? "☀️ โหมดสว่าง" : "🌙 โหมดมืด";
+}
+
+/* ============================================================
+   MODALS (ดูรูป & แก้ไขข้อมูล)
+============================================================ */
+function openModal(url) {
+    if (!url) return;
+    document.getElementById("expandedImg").src = url;
+    document.getElementById("imageModal").classList.add("active");
+}
+function closeModal(event) {
+    if (event) event.stopPropagation();
+    document.getElementById("imageModal").classList.remove("active");
+    document.getElementById("expandedImg").src = "";
+}
+
+function openEditModal(bookingNo, planDate, containerObj) {
+    document.getElementById("edit-booking").value = bookingNo;
+    document.getElementById("edit-old-container").value = containerObj.containerNo || "";
+    document.getElementById("edit-plan-date").value = planDate || "";
+
+    document.getElementById("edit-container").value = containerObj.containerNo || "";
+    document.getElementById("edit-size").value = containerObj.size || "";
+    document.getElementById("edit-seal").value = containerObj.sealNo || "";
+    document.getElementById("edit-plate").value = containerObj.licensePlate || "";
+    document.getElementById("edit-driver").value = containerObj.driverName || "";
+
+    document.getElementById("editModal").classList.add("active");
+}
+
+function closeEditModal() {
+    document.getElementById("editModal").classList.remove("active");
+}
+
+function isAnyModalOpen() {
+    return document.getElementById("imageModal").classList.contains("active") ||
+           document.getElementById("editModal").classList.contains("active");
+}
+
+// ⭐️ ฟังก์ชันยิง API ไปอัปเดตข้อมูลที่ Google Sheets
+async function submitEditData() {
+    const btn = document.getElementById("btn-save-edit");
+    btn.innerHTML = "⏳ กำลังบันทึก...";
+    btn.disabled = true;
+
+    const payload = {
+        source: "DASHBOARD",
+        action: "editContainer",
+        token: ensureToken(),
+        bookingNo: document.getElementById("edit-booking").value,
+        oldContainer: document.getElementById("edit-old-container").value,
+        planDateStr: document.getElementById("edit-plan-date").value,
+        newContainer: document.getElementById("edit-container").value,
+        size: document.getElementById("edit-size").value,
+        sealNo: document.getElementById("edit-seal").value,
+        licensePlate: document.getElementById("edit-plate").value,
+        driverName: document.getElementById("edit-driver").value
+    };
+
+    try {
+        const response = await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        });
+
+        if (response.ok) {
+            showToast("✅ แก้ไขและอัปเดตไปที่ชีท Control สำเร็จ!");
+            closeEditModal();
+            fetchDashboardData(false); // รีเฟรชหน้าบอร์ดทันที
+        } else {
+            throw new Error("API Failed");
         }
+    } catch (err) {
+        showToast("⚠️ ไม่สามารถบันทึกข้อมูลได้", "error");
+    } finally {
+        btn.innerHTML = "💾 บันทึกการแก้ไข";
+        btn.disabled = false;
+    }
+}
 
-        function renderDashboard(data) {
-            document.getElementById('sync-status').innerText = "🟢 อัปเดตล่าสุด: " + new Date().toLocaleTimeString();
-            document.getElementById('sync-status').style.background = "#2ecc71";
-            
-            const container = document.getElementById('dashboard-container');
-            let html = '';
+/* ============================================================
+   MAGIC FUNCTION: CANVAS COLLAGE & CLIPBOARD
+============================================================ */
+// ⭐️ ไล่ลองทีละ proxy ถ้าตัวแรกล่ม/โดนบล็อก จะสลับไปตัวถัดไปอัตโนมัติ กัน corsproxy.io เป็นจุดล้มเหลวเดียว
+// (แก้ corsproxy.io ให้ใช้ query param ?url= ตามฟอร์แมตปัจจุบัน — ของเดิมใช้ฟอร์แมตเก่าที่อาจถูกเลิกรองรับแล้ว)
+const IMAGE_PROXIES = [
+    (url) => "https://corsproxy.io/?url=" + encodeURIComponent(url),
+    (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url)
+];
 
-            if(data.length === 0) {
-                container.innerHTML = '<p style="text-align:center;">🎉 ไม่มีงานค้างในระบบค่ะ</p>';
-                return;
-            }
+async function fetchImageBlob(url) {
+    let lastError = null;
+    for (const buildProxyUrl of IMAGE_PROXIES) {
+        try {
+            const response = await fetch(buildProxyUrl(url));
+            if (!response.ok) throw new Error(`proxy ตอบกลับ HTTP ${response.status}`);
+            const blob = await response.blob();
+            if (!blob || blob.size === 0) throw new Error("proxy ตอบกลับข้อมูลว่างเปล่า");
+            // ⭐️ เช็คว่าของที่ได้มาเป็นรูปจริง — proxy บางตัวตอบ 200 OK แต่เนื้อหาเป็นหน้า error (text/html) แทนรูป
+            if (!blob.type.startsWith("image/")) throw new Error(`proxy ไม่ได้ส่งรูปกลับมา (ได้ "${blob.type || "ไม่ทราบชนิด"}" แทน)`);
+            return blob;
+        } catch (err) {
+            lastError = err;
+        }
+    }
+    throw lastError || new Error("โหลดรูปไม่สำเร็จจากทุก proxy");
+}
 
-            data.forEach(booking => {
-                // เช็กสถานะ Auto-send จาก LocalStorage ของเบราว์เซอร์
-                const isAutoOn = localStorage.getItem('auto_send_' + booking.bookingNo) === 'true';
-                
-                html += `
-                <div class="booking-card">
-                    <div class="booking-header">
-                        <div class="booking-title">📁 Booking: ${booking.bookingNo} <br> <span style="font-size:14px; color:#bdc3c7;">ลูกค้า: ${booking.customer} | รวม ${booking.containers.length} ตู้</span></div>
-                        
-                        <!-- ⭐️ ส่วนเพิ่มปุ่มกดสั่งงาน -->
-                        <div class="action-group">
-                            <div class="toggle-wrapper">
-                                Auto-Send
-                                <label class="switch">
-                                    <input type="checkbox" onchange="toggleAutoSend(this, '${booking.bookingNo}')" ${isAutoOn ? 'checked' : ''}>
-                                    <span class="slider"></span>
-                                </label>
-                            </div>
-                            <button class="btn-send" onclick="sendToCustomer('${booking.bookingNo}')">
-                                🚀 ส่งให้ลูกค้า
-                            </button>
-                        </div>
+async function processOneClickCopy(containerNo, size, sealNo, bookingNo, planDate, position, total, plateNo, driverName, imgUrlsRaw, btn) {
+    // ⭐️ ยืนยันก่อน เพราะขั้นตอนนี้จะย้ายตู้เข้าประวัติ (archive) ซึ่งย้อนกลับไม่ได้
+    const confirmed = window.confirm(`ยืนยันคัดลอกและย้ายตู้ "${containerNo}" เข้าสู่ประวัติ?\nการกระทำนี้ไม่สามารถย้อนกลับได้`);
+    if (!confirmed) return;
 
-                    </div>
-                    <div class="container-grid">`;
-                
-                booking.containers.forEach(cont => {
-                    html += `
-                        <div class="container-item">
-                            <div class="info-row"><span class="info-label">📦 ตู้:</span> <span class="info-value">${cont.containerNo} (${cont.size})</span></div>
-                            <div class="info-row"><span class="info-label">🔒 ซีล:</span> <span class="info-value">${cont.sealNo}</span></div>
-                            <div class="info-row"><span class="info-label">⏰ เวลา:</span> <span class="info-value">${cont.timestamp}</span></div>
-                            <div class="info-row"><span class="info-label">🤖 AI:</span> <span class="info-value">${cont.status === 'Approved' ? '✅ ผ่าน' : '⚠️ รอตรวจ'}</span></div>
-                            
-                            <div class="image-gallery">`;
-                    
-                    if(cont.picFront) html += `<div class="img-box"><img src="${cont.picFront}" onclick="openModal('${cont.picFront}')"><p>หน้าตู้</p></div>`;
-                    if(cont.picSeal) html += `<div class="img-box"><img src="${cont.picSeal}" onclick="openModal('${cont.picSeal}')"><p>ซีล</p></div>`;
-                    if(cont.picEIR) html += `<div class="img-box"><img src="${cont.picEIR}" onclick="openModal('${cont.picEIR}')"><p>EIR</p></div>`;
-                    
-                    html += `</div></div>`;
-                });
-                
-                html += `</div></div>`;
+    let textMsg = `ตู้บรรจุ ${planDate}\nBKG: ${bookingNo}\n\nลำดับที่: ${position}/${total}\n📦 ตู้: ${containerNo}\n🔒 ซีล: ${sealNo}`;
+    if (plateNo && plateNo !== "-") {
+        textMsg += `\n🚚 ทะเบียน: ${plateNo}\n👤 พขร: ${driverName || "-"}`;
+    }
+
+    btn.disabled = true;
+    const originalBtnHtml = btn.innerHTML;
+    btn.innerHTML = "⏳ กำลังประมวลผลรูปภาพ...";
+
+    try {
+        const validUrls = imgUrlsRaw.filter(u => u && u.trim() !== "");
+        let clipboardItemData = {
+            "text/plain": new Blob([textMsg], { type: "text/plain" })
+        };
+
+        if (validUrls.length > 0) {
+            // ⭐️ โหลด+ถอดรหัสรูปทั้งหมดพร้อมกัน (เดิมวนทีละรูป) ลดเวลารวมลงมาก
+            // เพราะ navigator.clipboard.write ต้องเรียกใกล้ ๆ กับตอนกดปุ่ม (user activation) — รอนานไปบาง browser จะปฏิเสธเงียบ ๆ
+            const blobs = await Promise.all(validUrls.map(fetchImageBlob));
+            const images = await Promise.all(blobs.map(blob => new Promise((resolve, reject) => {
+                const img = new Image();
+                img.onload = () => resolve(img);
+                img.onerror = reject;
+                img.src = URL.createObjectURL(blob);
+            })));
+
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            const imgSize = 500;
+            const padding = 10;
+
+            canvas.width = (imgSize * images.length) + (padding * (images.length - 1));
+            canvas.height = imgSize;
+            ctx.fillStyle = "#ffffff";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            images.forEach((img, i) => {
+                let ratio = Math.max(imgSize / img.width, imgSize / img.height);
+                let drawWidth = img.width * ratio;
+                let drawHeight = img.height * ratio;
+                let offsetX = (imgSize - drawWidth) / 2;
+                let offsetY = (imgSize - drawHeight) / 2;
+                let startX = i * (imgSize + padding);
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(startX, 0, imgSize, imgSize);
+                ctx.clip();
+                ctx.drawImage(img, startX + offsetX, offsetY, drawWidth, drawHeight);
+                ctx.restore();
             });
 
-            container.innerHTML = html;
+            const finalImageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+            clipboardItemData["image/png"] = finalImageBlob;
         }
 
-        // ================= ระบบจัดการปุ่มกด =================
+        await navigator.clipboard.write([new ClipboardItem(clipboardItemData)]);
+        showToast(validUrls.length > 0
+            ? "✅ ก๊อปปี้ข้อความ+รูปเรียบร้อย! กด Ctrl+V ในกลุ่ม LINE ได้เลย"
+            : "✅ ก๊อปปี้ข้อความเรียบร้อย! (ตู้นี้ไม่มีรูปแนบให้รวม)");
 
-        // 1. ระบบยืนยันการเปิด Auto-send
-        function toggleAutoSend(checkbox, bookingNo) {
-            if (checkbox.checked) {
-                // ถ้ากดเปิด ให้เด้งหน้าต่างถามก่อน
-                let confirmAction = confirm(`⚠️ คุณแน่ใจหรือไม่?\n\nต้องการเปิดโหมด "Auto-Send" สำหรับ Booking: ${bookingNo} \nหากมีตู้ของ Booking นี้เข้ามา ระบบจะส่งข้อมูลเข้ากลุ่ม LINE ลูกค้าทันทีโดยไม่ง้อคนตรวจ!`);
-                
-                if (confirmAction) {
-                    localStorage.setItem('auto_send_' + bookingNo, 'true'); // บันทึกการตั้งค่าลงเบราว์เซอร์
-                    alert(`✅ เปิดระบบ Auto-Send สำหรับ Booking: ${bookingNo} เรียบร้อยแล้ว`);
+        // ⭐️ แยก try/catch ของขั้นตอน archive ออกมาต่างหาก — เดิม error ตรงนี้จะไปเขียนทับคลิปบอร์ดที่เพิ่งก๊อปสำเร็จด้วยข้อความเปล่า ๆ (บั๊ก)
+        try {
+            btn.innerHTML = "📦 กำลังย้ายเข้าประวัติ...";
+            await fetch(GAS_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: JSON.stringify({ source: "DASHBOARD", action: "archiveContainer", token: ensureToken(), containerNo: containerNo, bookingNo: bookingNo })
+            });
+            setTimeout(() => fetchDashboardData(false), 1500);
+        } catch (archiveError) {
+            console.error("Archive Error:", archiveError);
+            showToast("⚠️ ก๊อปปี้สำเร็จแล้ว แต่ย้ายตู้เข้าประวัติไม่สำเร็จ กด 🔄 แล้วลองใหม่", "error");
+            btn.disabled = false;
+            btn.innerHTML = originalBtnHtml;
+        }
+
+    } catch (error) {
+        console.error("Copy Error:", error);
+        // ⭐️ โชว์สาเหตุจริงใน toast เลย ไม่ต้องเปิด F12 ก็เห็นว่าทำไมถึงได้แค่ข้อความ
+        const reason = (error && error.message) ? error.message : String(error);
+        try {
+            await navigator.clipboard.writeText(textMsg);
+            showToast(`⚠️ ก๊อปปี้ได้แค่ข้อความ — สาเหตุ: ${reason}`, "warning");
+        } catch (clipboardError) {
+            console.error("Clipboard Error:", clipboardError);
+            showToast(`⚠️ ก๊อปปี้ไม่สำเร็จเลย — สาเหตุ: ${reason}`, "error");
+        }
+        btn.disabled = false;
+        btn.innerHTML = originalBtnHtml;
+    }
+}
+
+/* ============================================================
+   RENDER
+============================================================ */
+// ⭐️ รวม logic คำนวณความคืบหน้าไว้ที่เดียว ใช้ทั้งตอน sort และตอน render
+function getBookingProgress(booking) {
+    const containers = Array.isArray(booking.containers) ? booking.containers : [];
+    const archived = Number(booking.archivedCount) || 0;
+    const total = Number(booking.totalAmount) || 0;
+    const processed = archived + containers.length;
+    const percent = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : 0;
+    return { containers, archived, total, processed, percent };
+}
+
+function renderDashboard(data) {
+    const root = document.getElementById("dashboard-container");
+    if (!Array.isArray(data) || data.length === 0) {
+        root.innerHTML = `<div class="empty-state"><div class="empty-icon">🎉</div><div class="empty-title">ไม่มีงานค้างบนกระดาน</div><div class="empty-text">ระบบพร้อมรับงานใหม่</div></div>`;
+        return;
+    }
+
+    let html = "";
+    data.forEach(booking => {
+        const { containers, archived, total, processed, percent } = getBookingProgress(booking);
+
+        html += `
+        <section class="booking-card">
+            <div class="booking-header">
+                <div>
+                    <div class="booking-title">📁 Booking: ${esc(booking.bookingNo)}</div>
+                    <div class="booking-plan">📅 แผน: ${esc(booking.planDate)}</div>
+                    <div class="booking-progress">
+                        <div class="progress-track"><div class="progress-fill" style="width:${percent}%"></div></div>
+                        <div class="progress-text">
+                            <span>ความคืบหน้ารวม: ${processed}/${total || "?"} ตู้</span>
+                            <span>✅ ${archived} &nbsp;|&nbsp; ⏳ ${containers.length}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="booking-body">
+                <div class="container-grid">
+        `;
+
+        containers.forEach((container, index) => {
+            const position = archived + index + 1;
+
+            const frontImg = getDirectImgUrl(container.picFront);
+            const sealImg = getDirectImgUrl(container.picSeal);
+            const eirImg = getDirectImgUrl(container.picEIR);
+            // ⭐️ escJsonAttr กัน XSS: เดิมโค้ดนี้ฝัง URL ดิบลง onclick='...' โดยไม่ escape เครื่องหมาย '
+            const imagesArrayStr = escJsonAttr([frontImg, sealImg, eirImg]);
+
+            const finalPlate = container.licensePlate || "-";
+            const finalDriver = container.driverName || "-";
+
+            // ⭐️ แปลง JSON object ส่งให้ปุ่ม Edit (escJsonAttr escape ครบ & < > " ' ปลอดภัยกว่าการ replace แค่ ")
+            const containerJSON = escJsonAttr(container);
+
+            html += `
+                <article class="container-card">
+                    <div class="container-position">📦 ลำดับตู้ที่ ${position} / ${total || "?"} ในแผนงาน</div>
+
+                    <div class="container-number-row">
+                        <div class="container-number">
+                            ${esc(container.containerNo)}
+                            <button class="btn-edit" title="แก้ไขข้อมูล" onclick="openEditModal('${esc(booking.bookingNo)}', '${esc(booking.planDate)}', ${containerJSON})">✏️ แก้ไข</button>
+                        </div>
+                        <div class="size-badge">${esc(container.size)}</div>
+                    </div>
+
+                    <div class="info-row"><span class="info-label">🔒 ซีล</span><span class="info-value">${esc(container.sealNo)}</span></div>
+                    <div class="info-row"><span class="info-label">🚚 รถ/พขร.</span><span class="info-value">${esc(finalPlate)} / ${esc(finalDriver)}</span></div>
+
+                    <div class="info-row"><span class="info-label">⏰ เวลา</span><span class="info-value" style="font-weight:normal; font-size:12px;">${esc(container.timestamp)}</span></div>
+                    <div class="info-row"><span class="info-label">🤖 สถานะ</span><span class="status-verified">✅ ยืนยันแล้ว</span></div>
+
+                    <div class="gallery">`;
+
+            const imageList = [
+                { url: frontImg, label: "รูปที่ 1" },
+                { url: sealImg, label: "รูปที่ 2" },
+                { url: eirImg, label: "รูปที่ 3" }
+            ];
+
+            imageList.forEach(image => {
+                if (image.url) {
+                    html += `<div class="image-box"><img src="${esc(image.url)}" alt="${image.label}" loading="lazy" onclick="openModal('${esc(image.url)}')"><div class="image-label">${image.label}</div></div>`;
                 } else {
-                    checkbox.checked = false; // ยกเลิกการเปิด ถ้ากด Cancel
+                    html += `<div class="image-box"><div class="missing-image">ไม่มีรูป</div><div class="image-label">${image.label}</div></div>`;
                 }
-            } else {
-                // ถ้ากดปิด ปิดได้เลยไม่ต้องถาม
-                localStorage.setItem('auto_send_' + bookingNo, 'false');
-            }
+            });
+
+            html += `
+                    </div>
+                    <button class="btn-smart-copy" onclick='processOneClickCopy("${esc(container.containerNo)}", "${esc(container.size)}", "${esc(container.sealNo)}", "${esc(booking.bookingNo)}", "${esc(booking.planDate)}", ${position}, ${total}, "${esc(finalPlate)}", "${esc(finalDriver)}", ${imagesArrayStr}, this)'>
+                        📋 คัดลอกและรวมรูปพร้อมส่ง (1-Click)
+                    </button>
+                </article>
+            `;
+        });
+
+        html += `</div></div></section>`;
+    });
+    root.innerHTML = html;
+}
+
+/* ============================================================
+   FETCH DATA & SEARCH
+============================================================ */
+async function fetchDashboardData(force = false) {
+    try {
+        const response = await fetch(withToken(GAS_API_URL + "?action=getDashboardData&_=" + Date.now()), { cache: "no-store" });
+        if (!response.ok) throw new Error("Network error");
+        const data = await response.json();
+
+        // ⭐️ ถ้าฝั่ง GAS เพิ่มการตรวจ token แล้วและตอบกลับ {"error":"unauthorized"} มา
+        // ให้ล้าง token เดิมทิ้งแล้วขอรหัสใหม่รอบหน้า (GAS Web App มักตอบ 200 เสมอ เช็คจาก body แทน status code)
+        if (data && data.error) {
+            setStoredToken("");
+            document.getElementById("sync-status").textContent = "🔴 รหัสเข้าใช้งานไม่ถูกต้อง";
+            showToast("⚠️ รหัสเข้าใช้งานไม่ถูกต้อง กด 🔑 เพื่อกรอกใหม่", "error");
+            return;
         }
 
-        // 2. ระบบกดส่งให้ลูกค้าแบบ Manual
-        function sendToCustomer(bookingNo) {
-            let confirmSend = confirm(`ยืนยันการส่งสรุปงาน Booking: ${bookingNo} ให้ลูกค้าใช่ไหมคะ?`);
-            if (confirmSend) {
-                alert(`🚀 กำลังส่งข้อมูล Booking: ${bookingNo} ไปยังกลุ่ม LINE ลูกค้า... (เชื่อมต่อ API ในอนาคต)`);
-                // โค้ดตรงนี้เดี๋ยวเราจะมาเขียนเชื่อมให้ยิง LINE Notify กันในสเต็ปต่อไปค่ะ
-            }
-        }
+        dashboardData = Array.isArray(data) ? data : [];
+        applyFilters();
+        document.getElementById("sync-status").textContent = "🟢 อัปเดตล่าสุด: " + new Date().toLocaleTimeString("th-TH");
+        document.getElementById("sync-status").style.background = "";
+        document.getElementById("sync-status").style.color = "";
+        if (force) showToast("รีเฟรชข้อมูลสำเร็จ");
+    } catch (error) {
+        document.getElementById("sync-status").textContent = "🔴 เชื่อมต่อไม่ได้";
+        document.getElementById("sync-status").style.background = "#fdecec";
+        document.getElementById("sync-status").style.color = "#c0392b";
+    }
+}
 
-        // ================= ระบบจัดการรูปภาพ =================
-        function openModal(imgUrl) { document.getElementById("imageModal").style.display = "block"; document.getElementById("expandedImg").src = imgUrl; }
-        function closeModal() { document.getElementById("imageModal").style.display = "none"; }
+// ⭐️ ระหว่างมีโมดัล (ดูรูป/แก้ไข) เปิดค้างอยู่ ให้ข้ามรอบโพลอัตโนมัติ กันข้อมูลเปลี่ยนใต้มือผู้ใช้
+function pollTick() {
+    if (isAnyModalOpen()) return;
+    fetchDashboardData(false);
+}
 
-        // เริ่มดึงข้อมูล และตั้งเวลา Refresh ทุกๆ 5 วินาที
-        fetchDashboardData();
-        setInterval(fetchDashboardData, 5000);
-        
-    </script>
+function applyFilters() {
+    const search = safe(document.getElementById("search").value).toLowerCase();
+    const filter = document.getElementById("filter").value;
+    const filtered = dashboardData.map(booking => {
+        const containers = Array.isArray(booking.containers) ? booking.containers : [];
+        return {
+            ...booking,
+            containers: containers.filter(container => {
+                const text = [booking.bookingNo, container.containerNo, container.sealNo].join(" ").toLowerCase();
+                const matchSearch = !search || text.includes(search);
+                const verified = safe(container.status).toLowerCase() === "verified";
+                const matchFilter = filter === "all" ? true : verified;
+                return matchSearch && matchFilter;
+            })
+        };
+    }).filter(booking => search || filter !== "all" ? booking.containers.length > 0 : true);
+
+    // ⭐️ เรียง booking ที่คืบหน้าน้อยสุด (เร่งด่วนสุด) ขึ้นบนสุด
+    filtered.sort((a, b) => getBookingProgress(a).percent - getBookingProgress(b).percent);
+
+    renderDashboard(filtered);
+}
+
+document.getElementById("search").addEventListener("input", debounce(applyFilters, 250));
+document.getElementById("filter").addEventListener("change", applyFilters);
+
+// INITIALIZE
+updateThemeButtonLabel();
+fetchDashboardData();
+setInterval(pollTick, 15000);
+</script>
+
 </body>
 </html>
