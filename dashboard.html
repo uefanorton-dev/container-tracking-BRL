@@ -103,6 +103,11 @@
         .btn-edit { background: var(--bg); border: 1px solid var(--line); color: var(--text); padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; cursor: pointer; transition: 0.2s; margin-left: 8px; }
         .btn-edit:hover { background: var(--line); }
 
+        .card-actions { display: flex; gap: 8px; margin-top: 8px; }
+        .btn-secondary { flex: 1; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 11px; font-weight: 800; transition: 0.2s; }
+        .btn-secondary:hover { background: var(--line); color: var(--text); }
+        .btn-secondary:disabled { opacity: .6; cursor: not-allowed; }
+
         /* MODALS */
         .modal { display: none; position: fixed; inset: 0; z-index: 9999; align-items: center; justify-content: center; padding: 20px; background: rgba(0,0,0,.88); }
         .modal.active { display: flex; }
@@ -252,6 +257,14 @@ function getDirectImgUrl(url) {
     let match = url.match(/[?&]id=([a-zA-Z0-9_-]+)/) || url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
     if (match && match[1]) return `https://lh3.googleusercontent.com/d/${match[1]}`;
     return url;
+}
+
+// ⭐️ ขอ "รูปย่อ" จาก Google แทนไฟล์ต้นฉบับ — รูปจากมือถือคนขับมักใหญ่ 3-8MB/ใบ
+// lh3.googleusercontent.com รองรับ suffix =wXXXX (Google ย่อให้ฝั่งเซิร์ฟเวอร์) ลดขนาดโหลดได้ ~90%
+// นี่คือต้นเหตุที่ proxy timeout (HTTP 408): เดิมดึงไฟล์เต็ม 3 ใบ = 10-25MB ต่อการกดปุ่มหนึ่งครั้ง
+function sizedImgUrl(url, width) {
+    if (!url || !url.includes("lh3.googleusercontent.com")) return url;
+    return url.split("=")[0] + "=w" + width;   // base URL ไม่มี "=" อยู่แล้ว จึงตัดท้ายได้ปลอดภัย
 }
 
 function showToast(message, type = "success") {
@@ -414,124 +427,190 @@ async function submitEditData() {
 /* ============================================================
    MAGIC FUNCTION: CANVAS COLLAGE & CLIPBOARD
 ============================================================ */
-// ⭐️ ไล่ลองทีละ proxy ถ้าตัวแรกล่ม/โดนบล็อก จะสลับไปตัวถัดไปอัตโนมัติ กัน corsproxy.io เป็นจุดล้มเหลวเดียว
-// (แก้ corsproxy.io ให้ใช้ query param ?url= ตามฟอร์แมตปัจจุบัน — ของเดิมใช้ฟอร์แมตเก่าที่อาจถูกเลิกรองรับแล้ว)
+// proxy สำรอง ใช้เฉพาะกรณีโหลดตรงจาก Google ไม่สำเร็จเท่านั้น (ปกติไม่ควรได้ใช้)
 const IMAGE_PROXIES = [
     (url) => "https://corsproxy.io/?url=" + encodeURIComponent(url),
     (url) => "https://api.allorigins.win/raw?url=" + encodeURIComponent(url)
 ];
 
-async function fetchImageBlob(url) {
+// 1600px: อ่านเลขซีล/ตัวหนังสือในใบ EIR ได้ชัด แต่ยังเบากว่าไฟล์ต้นฉบับจากมือถือ (3-8MB) หลายเท่า
+const SHARE_IMG_WIDTH = 1600;
+const DIRECT_TIMEOUT_MS = 10000;
+const PROXY_TIMEOUT_MS = 8000;
+
+function loadImageElement(src, useCors) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        // crossOrigin จำเป็นตอนโหลดตรงจาก Google เพื่อให้ canvas ไม่ถูก "taint" (ไม่งั้น toBlob จะพัง)
+        if (useCors) img.crossOrigin = "anonymous";
+        img.onload = () => resolve(img);
+        img.onerror = () => reject(new Error("decode รูปไม่สำเร็จ"));
+        img.src = src;
+    });
+}
+
+async function fetchWithTimeout(url, ms) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), ms);
+    try {
+        return await fetch(url, { signal: controller.signal });
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+// แปลง <img> ที่โหลดมาแล้วเป็นไฟล์รูป (ใช้เมื่อ fetch ตรงโดน CORS แต่ <img crossOrigin> ผ่าน)
+function imageElementToBlob(img) {
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext("2d").drawImage(img, 0, 0);
+    return new Promise((resolve, reject) => {
+        canvas.toBlob(b => b ? resolve(b) : reject(new Error("แปลงรูปไม่สำเร็จ")), "image/jpeg", 0.92);
+    });
+}
+
+// ⭐️ ดึงรูป "ทีละใบ แยกไฟล์กัน" (ไม่รวมเป็นภาพเดียวแล้ว ตามกฎลูกค้า) แบบ 3 ชั้น:
+//    (1) fetch ตรงจาก Google → (2) <img crossOrigin> แล้วแปลงเป็นไฟล์ → (3) proxy สำรอง
+async function loadImageBlob(rawUrl) {
+    const url = sizedImgUrl(rawUrl, SHARE_IMG_WIDTH);
     let lastError = null;
+
+    // ชั้นที่ 1: fetch ตรง — ได้ไฟล์ต้นฉบับ ไม่ต้องแปลงซ้ำ เร็วสุด และไม่พึ่งบริการฟรีของคนอื่น
+    try {
+        const response = await fetchWithTimeout(url, DIRECT_TIMEOUT_MS);
+        if (!response.ok) throw new Error(`Google ตอบกลับ HTTP ${response.status}`);
+        const blob = await response.blob();
+        if (blob.type.startsWith("image/")) return blob;
+        throw new Error(`ได้ "${blob.type || "ไม่ทราบชนิด"}" แทนรูป`);
+    } catch (err) {
+        lastError = err;
+        console.warn("fetch ตรงไม่สำเร็จ:", rawUrl, err);
+    }
+
+    // ชั้นที่ 2: โหลดผ่าน <img crossOrigin> แล้ววาดลง canvas เพื่อดึงไบต์ออกมา
+    try {
+        return await imageElementToBlob(await loadImageElement(url, true));
+    } catch (err) {
+        lastError = err;
+        console.warn("โหลดผ่าน <img> ไม่สำเร็จ:", rawUrl, err);
+    }
+
+    // ชั้นที่ 3: proxy สำรอง (ทางสุดท้าย)
     for (const buildProxyUrl of IMAGE_PROXIES) {
         try {
-            const response = await fetch(buildProxyUrl(url));
+            const response = await fetchWithTimeout(buildProxyUrl(url), PROXY_TIMEOUT_MS);
             if (!response.ok) throw new Error(`proxy ตอบกลับ HTTP ${response.status}`);
             const blob = await response.blob();
             if (!blob || blob.size === 0) throw new Error("proxy ตอบกลับข้อมูลว่างเปล่า");
-            // ⭐️ เช็คว่าของที่ได้มาเป็นรูปจริง — proxy บางตัวตอบ 200 OK แต่เนื้อหาเป็นหน้า error (text/html) แทนรูป
-            if (!blob.type.startsWith("image/")) throw new Error(`proxy ไม่ได้ส่งรูปกลับมา (ได้ "${blob.type || "ไม่ทราบชนิด"}" แทน)`);
+            if (!blob.type.startsWith("image/")) throw new Error(`proxy ไม่ได้ส่งรูปกลับมา (ได้ "${blob.type || "ไม่ทราบชนิด"}")`);
             return blob;
         } catch (err) {
-            lastError = err;
+            lastError = err.name === "AbortError" ? new Error(`proxy ไม่ตอบใน ${PROXY_TIMEOUT_MS / 1000} วิ`) : err;
         }
     }
-    throw lastError || new Error("โหลดรูปไม่สำเร็จจากทุก proxy");
+    throw lastError || new Error("โหลดรูปไม่สำเร็จ");
 }
 
-async function processOneClickCopy(containerNo, size, sealNo, bookingNo, planDate, position, total, plateNo, driverName, imgUrlsRaw, btn) {
-    // ⭐️ ยืนยันก่อน เพราะขั้นตอนนี้จะย้ายตู้เข้าประวัติ (archive) ซึ่งย้อนกลับไม่ได้
-    const confirmed = window.confirm(`ยืนยันคัดลอกและย้ายตู้ "${containerNo}" เข้าสู่ประวัติ?\nการกระทำนี้ไม่สามารถย้อนกลับได้`);
-    if (!confirmed) return;
+function blobToFile(blob, filename) {
+    const ext = blob.type === "image/png" ? "png" : "jpg";
+    return new File([blob], `${filename}.${ext}`, { type: blob.type || "image/jpeg" });
+}
 
-    let textMsg = `ตู้บรรจุ ${planDate}\nBKG: ${bookingNo}\n\nลำดับที่: ${position}/${total}\n📦 ตู้: ${containerNo}\n🔒 ซีล: ${sealNo}`;
+// แผนสำรองเมื่อเครื่องไม่รองรับ Web Share: บันทึกรูปลงเครื่องให้ แล้วลากเข้า LINE ทีเดียว
+function downloadFile(file) {
+    const url = URL.createObjectURL(file);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = file.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+}
+
+function buildContainerMessage(containerNo, sealNo, bookingNo, planDate, position, total, plateNo, driverName) {
+    // ⚠️ รูปแบบข้อความนี้คือ "สัญญา" ระหว่าง dashboard กับ LINE bot
+    // บอทจะมองหา "BKG:" และ "📦 ตู้:" เพื่อยืนยันว่าเป็นข้อความของระบบเรา แล้วดึงเบอร์ตู้ไปหารูป
+    // ถ้าแก้รูปแบบตรงนี้ ต้องแก้ regex ฝั่ง Google Apps Script ให้ตรงกันด้วย
+    let msg = `ตู้บรรจุ ${planDate}\nBKG: ${bookingNo}\n\nลำดับที่: ${position}/${total}\n📦 ตู้: ${containerNo}\n🔒 ซีล: ${sealNo}`;
     if (plateNo && plateNo !== "-") {
-        textMsg += `\n🚚 ทะเบียน: ${plateNo}\n👤 พขร: ${driverName || "-"}`;
+        msg += `\n🚚 ทะเบียน: ${plateNo}\n👤 พขร: ${driverName || "-"}`;
+    }
+    return msg;
+}
+
+// ⭐️ ปุ่มหลัก: ก๊อปแค่ "ข้อความ" อย่างเดียว ไม่โหลดรูปลงเครื่องเลย
+// พอ dispatcher วางข้อความในกลุ่ม LINE บอทจะอ่านเจอเบอร์ตู้ แล้วส่งรูป 3 ใบตามมาเอง
+// พร้อมย้ายตู้เข้าประวัติให้อัตโนมัติ (archive เกิดฝั่งบอท = การันตีว่าลูกค้าได้รับจริงแล้ว)
+async function copyContainerMessage(containerNo, sealNo, bookingNo, planDate, position, total, plateNo, driverName, btn) {
+    const textMsg = buildContainerMessage(containerNo, sealNo, bookingNo, planDate, position, total, plateNo, driverName);
+    const originalBtnHtml = btn.innerHTML;
+    try {
+        await navigator.clipboard.writeText(textMsg);
+        btn.innerHTML = "✅ ก๊อปแล้ว — วางในกลุ่ม LINE ได้เลย";
+        showToast("📋 ก๊อปข้อความแล้ว → วางในกลุ่ม LINE แล้วบอทจะส่งรูป 3 ใบตามมาให้เอง");
+        setTimeout(() => { btn.innerHTML = originalBtnHtml; }, 2500);
+    } catch (err) {
+        console.error("Copy Error:", err);
+        showToast(`⚠️ ก๊อปข้อความไม่สำเร็จ — ${err.message || err}`, "error");
+    }
+}
+
+// แผนสำรองระหว่างที่ยังไม่ได้เชิญบอทเข้ากลุ่มนั้น ๆ — โหลดรูปแยกใบลงเครื่องแล้วแนบเข้า LINE เอง
+async function downloadContainerImages(containerNo, imgUrlsRaw, btn) {
+    const validUrls = imgUrlsRaw.filter(u => u && u.trim() !== "");
+    if (validUrls.length === 0) {
+        showToast("ตู้นี้ไม่มีรูปแนบ", "warning");
+        return;
     }
 
-    btn.disabled = true;
     const originalBtnHtml = btn.innerHTML;
-    btn.innerHTML = "⏳ กำลังประมวลผลรูปภาพ...";
+    btn.disabled = true;
+    btn.innerHTML = "⏳ กำลังโหลด...";
 
     try {
-        const validUrls = imgUrlsRaw.filter(u => u && u.trim() !== "");
-        let clipboardItemData = {
-            "text/plain": new Blob([textMsg], { type: "text/plain" })
-        };
-
-        if (validUrls.length > 0) {
-            // ⭐️ โหลด+ถอดรหัสรูปทั้งหมดพร้อมกัน (เดิมวนทีละรูป) ลดเวลารวมลงมาก
-            // เพราะ navigator.clipboard.write ต้องเรียกใกล้ ๆ กับตอนกดปุ่ม (user activation) — รอนานไปบาง browser จะปฏิเสธเงียบ ๆ
-            const blobs = await Promise.all(validUrls.map(fetchImageBlob));
-            const images = await Promise.all(blobs.map(blob => new Promise((resolve, reject) => {
-                const img = new Image();
-                img.onload = () => resolve(img);
-                img.onerror = reject;
-                img.src = URL.createObjectURL(blob);
-            })));
-
-            const canvas = document.createElement('canvas');
-            const ctx = canvas.getContext('2d');
-            const imgSize = 500;
-            const padding = 10;
-
-            canvas.width = (imgSize * images.length) + (padding * (images.length - 1));
-            canvas.height = imgSize;
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            images.forEach((img, i) => {
-                let ratio = Math.max(imgSize / img.width, imgSize / img.height);
-                let drawWidth = img.width * ratio;
-                let drawHeight = img.height * ratio;
-                let offsetX = (imgSize - drawWidth) / 2;
-                let offsetY = (imgSize - drawHeight) / 2;
-                let startX = i * (imgSize + padding);
-
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(startX, 0, imgSize, imgSize);
-                ctx.clip();
-                ctx.drawImage(img, startX + offsetX, offsetY, drawWidth, drawHeight);
-                ctx.restore();
-            });
-
-            const finalImageBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-            clipboardItemData["image/png"] = finalImageBlob;
+        const results = await Promise.allSettled(validUrls.map(u => loadImageBlob(u)));
+        const files = [];
+        results.forEach((r, i) => {
+            if (r.status === "fulfilled") files.push(blobToFile(r.value, `${containerNo}_${i + 1}`));
+        });
+        if (files.length === 0) {
+            throw ((results.find(r => r.status === "rejected") || {}).reason || new Error("โหลดรูปไม่สำเร็จ"));
         }
 
-        await navigator.clipboard.write([new ClipboardItem(clipboardItemData)]);
-        showToast(validUrls.length > 0
-            ? "✅ ก๊อปปี้ข้อความ+รูปเรียบร้อย! กด Ctrl+V ในกลุ่ม LINE ได้เลย"
-            : "✅ ก๊อปปี้ข้อความเรียบร้อย! (ตู้นี้ไม่มีรูปแนบให้รวม)");
+        files.forEach(downloadFile);
+        const failedCount = validUrls.length - files.length;
+        showToast(failedCount > 0
+            ? `💾 โหลดได้ ${files.length}/${validUrls.length} ใบ (บางใบโหลดไม่สำเร็จ)`
+            : `💾 โหลดรูป ${files.length} ใบแล้ว — แนบเข้า LINE ได้เลย`, failedCount > 0 ? "warning" : "success");
+    } catch (err) {
+        console.error("Download Error:", err);
+        showToast(`⚠️ โหลดรูปไม่สำเร็จ — ${err.message || err}`, "error");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = originalBtnHtml;
+    }
+}
 
-        // ⭐️ แยก try/catch ของขั้นตอน archive ออกมาต่างหาก — เดิม error ตรงนี้จะไปเขียนทับคลิปบอร์ดที่เพิ่งก๊อปสำเร็จด้วยข้อความเปล่า ๆ (บั๊ก)
-        try {
-            btn.innerHTML = "📦 กำลังย้ายเข้าประวัติ...";
-            await fetch(GAS_API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: JSON.stringify({ source: "DASHBOARD", action: "archiveContainer", token: ensureToken(), containerNo: containerNo, bookingNo: bookingNo })
-            });
-            setTimeout(() => fetchDashboardData(false), 1500);
-        } catch (archiveError) {
-            console.error("Archive Error:", archiveError);
-            showToast("⚠️ ก๊อปปี้สำเร็จแล้ว แต่ย้ายตู้เข้าประวัติไม่สำเร็จ กด 🔄 แล้วลองใหม่", "error");
-            btn.disabled = false;
-            btn.innerHTML = originalBtnHtml;
-        }
+// ย้ายเข้าประวัติด้วยมือ — ใช้กรณีบอทยังไม่ได้อยู่ในกลุ่มนั้น หรือส่งด้วยวิธีอื่น
+async function manualArchive(containerNo, bookingNo, btn) {
+    if (!window.confirm(`ย้ายตู้ "${containerNo}" เข้าประวัติเลยใช่ไหม?\n\n(ปกติบอทจะย้ายให้เองหลังส่งรูปเข้ากลุ่มสำเร็จ)`)) return;
 
-    } catch (error) {
-        console.error("Copy Error:", error);
-        // ⭐️ โชว์สาเหตุจริงใน toast เลย ไม่ต้องเปิด F12 ก็เห็นว่าทำไมถึงได้แค่ข้อความ
-        const reason = (error && error.message) ? error.message : String(error);
-        try {
-            await navigator.clipboard.writeText(textMsg);
-            showToast(`⚠️ ก๊อปปี้ได้แค่ข้อความ — สาเหตุ: ${reason}`, "warning");
-        } catch (clipboardError) {
-            console.error("Clipboard Error:", clipboardError);
-            showToast(`⚠️ ก๊อปปี้ไม่สำเร็จเลย — สาเหตุ: ${reason}`, "error");
-        }
+    const originalBtnHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = "⏳";
+    try {
+        await fetch(GAS_API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ source: "DASHBOARD", action: "archiveContainer", token: ensureToken(), containerNo: containerNo, bookingNo: bookingNo })
+        });
+        showToast("📦 ย้ายเข้าประวัติแล้ว");
+        setTimeout(() => fetchDashboardData(false), 1200);
+    } catch (err) {
+        console.error("Archive Error:", err);
+        showToast("⚠️ ย้ายเข้าประวัติไม่สำเร็จ", "error");
         btn.disabled = false;
         btn.innerHTML = originalBtnHtml;
     }
@@ -623,7 +702,11 @@ function renderDashboard(data) {
 
             imageList.forEach(image => {
                 if (image.url) {
-                    html += `<div class="image-box"><img src="${esc(image.url)}" alt="${image.label}" loading="lazy" onclick="openModal('${esc(image.url)}')"><div class="image-label">${image.label}</div></div>`;
+                    // ⭐️ รูปย่อในกริดสูงแค่ 90px แต่เดิมโหลดไฟล์เต็ม 3-8MB มาแสดง — ขอขนาด 400px พอ
+                    // ส่วนตอนกดขยายค่อยขอ 1600px (คมพอดูเต็มจอ แต่ยังเบากว่าไฟล์ต้นฉบับมาก)
+                    const thumbUrl = sizedImgUrl(image.url, 400);
+                    const fullUrl = sizedImgUrl(image.url, 1600);
+                    html += `<div class="image-box"><img src="${esc(thumbUrl)}" alt="${image.label}" loading="lazy" onclick="openModal('${esc(fullUrl)}')"><div class="image-label">${image.label}</div></div>`;
                 } else {
                     html += `<div class="image-box"><div class="missing-image">ไม่มีรูป</div><div class="image-label">${image.label}</div></div>`;
                 }
@@ -631,9 +714,13 @@ function renderDashboard(data) {
 
             html += `
                     </div>
-                    <button class="btn-smart-copy" onclick='processOneClickCopy("${esc(container.containerNo)}", "${esc(container.size)}", "${esc(container.sealNo)}", "${esc(booking.bookingNo)}", "${esc(booking.planDate)}", ${position}, ${total}, "${esc(finalPlate)}", "${esc(finalDriver)}", ${imagesArrayStr}, this)'>
-                        📋 คัดลอกและรวมรูปพร้อมส่ง (1-Click)
+                    <button class="btn-smart-copy" onclick='copyContainerMessage("${esc(container.containerNo)}", "${esc(container.sealNo)}", "${esc(booking.bookingNo)}", "${esc(booking.planDate)}", ${position}, ${total}, "${esc(finalPlate)}", "${esc(finalDriver)}", this)'>
+                        📋 ก๊อปข้อความส่งกลุ่ม (บอทส่งรูปให้)
                     </button>
+                    <div class="card-actions">
+                        <button class="btn-secondary" title="ใช้กรณีบอทยังไม่ได้อยู่ในกลุ่มนั้น" onclick='downloadContainerImages("${esc(container.containerNo)}", ${imagesArrayStr}, this)'>💾 โหลดรูปเอง</button>
+                        <button class="btn-secondary" title="ปกติบอทจะย้ายให้อัตโนมัติหลังส่งสำเร็จ" onclick='manualArchive("${esc(container.containerNo)}", "${esc(booking.bookingNo)}", this)'>✓ เข้าประวัติ</button>
+                    </div>
                 </article>
             `;
         });
